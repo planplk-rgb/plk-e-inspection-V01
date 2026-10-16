@@ -40,7 +40,9 @@
   const nextVisit = d => visitsOf(d).filter(v => v.date >= today() && v.status !== 'cancelled')[0] || null;
   const mainVisit = d => nextVisit(d) || visitsOf(d).slice(-1)[0] || null;
 
+  const RLABEL = ['ทีมผู้ร่วมนิเทศ', 'ไฟล์ สสจ.', 'ผู้บริหารอำเภอ', 'สถานที่', 'ผู้ประสานงานหลัก', 'ไฟล์อำเภอ'];
   function readiness(v) {
+    if (v.ready) return v.ready.map((done, i) => ({ side: i < 2 ? 'sup' : 'dist', label: RLABEL[i], done }));
     const s = siteOf(v);
     return [
       { side: 'sup', label: 'ทีมผู้ร่วมนิเทศ', done: peopleOf(v, 'team').length > 0 },
@@ -51,6 +53,7 @@
       { side: 'dist', label: 'ไฟล์อำเภอ', done: filesOf(v, 'district').length > 0 },
     ];
   }
+  const fCount = v => v.fTotal !== undefined ? [v.fDone, v.fTotal] : (f => [f.filter(x => x.status === 'done').length, f.length])(findingsOf(v));
   const readyPct = v => { const r = readiness(v); return Math.round(r.filter(x => x.done).length / r.length * 100); };
 
   function toast(msg, kind = 'ok') {
@@ -61,8 +64,15 @@
   async function run(fn, okMsg) {
     document.body.classList.add('busy');
     try { const r = await fn(); if (okMsg) toast(okMsg); return r; }
-    catch (e) { if (e.auth === false) { S = null; renderLogin(e.message); } else toast(e.message, 'err'); throw e; }
+    catch (e) { if (e.auth === false) { S = null; loadPublic(e.message); } else toast(e.message, 'err'); throw e; }
     finally { document.body.classList.remove('busy'); }
+  }
+  async function loadPublic(msg) {
+    try {
+      const r = await api.call('publicDash');
+      S = Object.assign({ user: null, people: [], files: [], sites: [], findings: [] }, r);
+      ui.view = 'dash'; render(); if (msg) toast(msg, 'err');
+    } catch (e) { S = null; renderLogin(msg || ''); }
   }
   async function reload(keepScroll = true) {
     const y = window.scrollY;
@@ -82,6 +92,7 @@
         <small>กลุ่มงานพัฒนายุทธศาสตร์สาธารณสุข<br>สำนักงานสาธารณสุขจังหวัดพิษณุโลก</small>
       </div>
       <div class="card login-card">
+        <button class="btn sm ghost2" data-act="to-public">‹ กลับไปหน้าแดชบอร์ด</button>
         <h1>เข้าสู่ระบบ</h1>
         ${api.demo ? `<div class="note">โหมดทดลอง — ข้อมูลสมมติ เก็บในเบราว์เซอร์นี้เท่านั้น<br>
           ผู้ดูแลระบบ <b>admin</b> / <b>admin1234</b> · ผู้นิเทศ <b>sso01</b> / <b>demo1234</b><br>
@@ -108,6 +119,7 @@
   }
   function render() {
     if (!S) return renderLogin();
+    if (S.public) return renderPublic();
     const t = tabs();
     if (!ui.view || (ui.view !== 'district' && !t.some(x => x[0] === ui.view))) ui.view = 'dash';
     app.innerHTML = `
@@ -128,6 +140,23 @@
        schedule: vSchedule, users: vUsers, news: vNews, settings: vSettings, account: vAccount })[ui.view](m);
   }
 
+  function renderPublic() {
+    ui.view = 'dash';
+    app.innerHTML = `
+      <header class="top">
+        <div class="brand"><div class="logo">PLK</div>
+          <div><b>PLK e-Inspection</b><div class="sub">ตรวจเยี่ยมและนิเทศงาน คปสอ. · ปีงบประมาณ ${esc(S.settings.year)}</div></div></div>
+        <div class="right">
+          ${api.demo ? '<span class="chip s-post">โหมดทดลอง</span>' : ''}
+          <button class="btn primary" data-act="to-login">เข้าสู่ระบบ</button>
+        </div>
+      </header>
+      <div class="pub-note">แดชบอร์ดสาธารณะ แสดงเฉพาะภาพรวมกำหนดการและสถานะ · ผู้นิเทศและ คปสอ. กรุณา <a data-act="to-login">เข้าสู่ระบบ</a> เพื่อดูรายละเอียดและบันทึกข้อมูล</div>
+      <main id="main"></main>
+      <footer class="foot">${esc(S.settings.contact || 'กลุ่มงานพัฒนายุทธศาสตร์สาธารณสุข สสจ.พิษณุโลก')}</footer>`;
+    vDash($('#main'));
+  }
+
   /* ---------------- แดชบอร์ด ---------------- */
   function vDash(m) {
     const vs = S.visits.filter(v => v.status !== 'cancelled');
@@ -135,7 +164,7 @@
     const up = vs.filter(v => v.date >= today()).sort((a, b) => (a.date + a.start).localeCompare(b.date + b.start));
     const nx = up[0];
     const avg = vs.length ? Math.round(vs.reduce((a, v) => a + readyPct(v), 0) / vs.length) : 0;
-    const openF = S.findings.filter(f => f.status !== 'done').length;
+    const openF = S.visits.reduce((a, v) => { const [d, t] = fCount(v); return a + t - d; }, 0);
     m.innerHTML = `
       ${S.news.length ? `<section class="news">${S.news.slice(0, 3).map(n => `<div class="news-item ${n.pinned ? 'pin' : ''}">
         <b>${n.pinned ? '📌 ' : ''}${esc(n.title)}</b>${n.body ? `<p>${esc(n.body)}</p>` : ''}<small>${esc(n.createdAt.slice(0, 10))}</small></div>`).join('')}</section>` : ''}
@@ -174,10 +203,10 @@
         <tbody>${S.districts.map(d => {
           const v = mainVisit(d);
           if (!v) return `<tr><td><a data-act="go" data-view="district" data-d="${esc(d)}">${esc(d)}</a></td><td colspan="10" class="muted">ยังไม่มีกำหนดการ</td></tr>`;
-          const r = readiness(v), f = findingsOf(v);
+          const r = readiness(v), [fd, ft] = fCount(v);
           return `<tr><td><a data-act="go" data-view="district" data-d="${esc(d)}">${esc(d)}</a></td><td class="nowrap">${esc(dShort(v.date))}</td><td>${statusChip(v.status)}</td>
             ${r.map(x => `<td class="ck ${x.done ? 'y' : 'n'}">${x.done ? '✓' : '–'}</td>`).join('')}
-            <td>${f.length ? `${f.filter(x => x.status === 'done').length}/${f.length} ปิดแล้ว` : '–'}</td>
+            <td>${ft ? `${fd}/${ft} ปิดแล้ว` : '–'}</td>
             <td><b>${readyPct(v)}%</b></td></tr>`;
         }).join('')}</tbody></table>
         <p class="muted small">✓ = มีข้อมูลแล้ว · คอลัมน์สีฟ้าเป็นของฝั่งผู้นิเทศ สีเขียวเป็นของฝั่ง คปสอ. · แสดงกำหนดการครั้งถัดไปของแต่ละอำเภอ (ถ้าไม่มี แสดงครั้งล่าสุด)</p>
@@ -535,11 +564,16 @@
 
   /* ---------------- เหตุการณ์ ---------------- */
   document.addEventListener('click', async e => {
-    const b = e.target.closest('[data-act]'); if (!b || !S && b.dataset.act !== 'logout') return;
+    const b = e.target.closest('[data-act]'); if (!b) return;
     const a = b.dataset.act, id = b.dataset.id, find = (arr) => arr.find(x => x.id === id);
+    if (a === 'to-public') { await loadPublic(); window.scrollTo(0, 0); return; }
+    if (a === 'to-login' || (S && S.public && a === 'go')) {
+      renderLogin(a === 'go' && b.dataset.d ? `กรุณาเข้าสู่ระบบเพื่อดูรายละเอียดของ อ.${b.dataset.d}` : ''); window.scrollTo(0, 0); return;
+    }
+    if (!S && a !== 'logout') return;
     switch (a) {
       case 'go': ui.view = b.dataset.view; if (b.dataset.d) ui.district = b.dataset.d; render(); window.scrollTo(0, 0); break;
-      case 'logout': await api.logout(); S = null; ui.view = null; renderLogin(); break;
+      case 'logout': await api.logout(); S = null; ui.view = null; await loadPublic(); break;
       case 'cal': { const d = +b.dataset.dir; if (!d) { const n = new Date(); ui.month = [n.getFullYear(), n.getMonth()]; } else { const x = new Date(ui.month[0], ui.month[1] + d, 1); ui.month = [x.getFullYear(), x.getMonth()]; } render(); break; }
       case 'del-person': if (confirm('ลบรายชื่อนี้?')) await act('deletePerson', { id }, 'ลบแล้ว'); break;
       case 'del-file': if (confirm('ลบไฟล์นี้?')) await act('deleteFile', { id }, 'ลบแล้ว'); break;
@@ -636,5 +670,5 @@
   // datalist กลุ่มงาน (ใช้ร่วมทุกหน้า)
   const dl = document.createElement('datalist'); dl.id = 'groups'; dl.innerHTML = GROUPS.map(g => `<option value="${esc(g)}">`).join(''); document.body.appendChild(dl);
 
-  if (api.token) reload(false).catch(() => {}); else renderLogin();
+  if (api.token) reload(false).catch(() => {}); else loadPublic();
 })();

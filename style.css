@@ -126,3 +126,9 @@ details[open] summary{margin-bottom:8px} details form{background:#f8fafc;border:
   .grid2{grid-template-columns:1fr} .kv{grid-template-columns:1fr} .kv dt{margin-top:4px}
   .cal-cell{min-height:56px} .cal-ev{font-size:.66rem;padding:0 3px} .who{display:none} .top{padding:10px 16px} main{padding:12px 16px 48px}
 }
+
+/* แดชบอร์ดสาธารณะ */
+.pub-note{max-width:1208px;margin:12px auto 0;padding:10px 16px;background:#eef5fb;border:1px solid #cfe0ee;border-radius:10px;color:#1f4d78;font-size:.95rem}
+.pub-note a{cursor:pointer;font-weight:700;text-decoration:underline}
+.login-card>.btn{margin-bottom:6px}
+@media (max-width:1240px){ .pub-note{margin:12px 16px 0} }

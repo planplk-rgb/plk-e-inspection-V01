@@ -103,6 +103,7 @@ function doPost(e) {
   try {
     const action = String(req.action || '');
     if (action === 'login') return json_(login_(req));
+    if (action === 'publicDash') return json_(Object.assign({ ok: true }, publicDash_()));
     const me = session_(req.token);
     if (!me) return json_({ ok: false, error: 'กรุณาเข้าสู่ระบบใหม่', auth: false });
     const H = {
@@ -178,6 +179,31 @@ function bootstrap_(req, me) {
   };
   if (me.role === 'admin') out.users = table_('Users').map(publicUser_);
   return out;
+}
+
+/** แดชบอร์ดสาธารณะ (ไม่ต้องเข้าสู่ระบบ) — ส่งเฉพาะภาพรวม ไม่มีชื่อบุคคล เบอร์โทร ไฟล์ ลิงก์ประชุม หรือเนื้อหาข้อเสนอแนะ */
+function publicDash_() {
+  const st = settings_();
+  const people = table_('People'), sites = table_('Sites'), files = table_('Files'), findings = table_('Findings');
+  const visits = table_('Visits').map(v => {
+    const has = (arr, f) => arr.some(x => x.visitId === v.id && f(x));
+    const s = sites.find(x => x.visitId === v.id) || {};
+    const fs = findings.filter(f => f.visitId === v.id);
+    return {
+      id: v.id, district: v.district, round: v.round, date: v.date, start: v.start, end: v.end, mode: v.mode,
+      venue: s.venueName || v.venue, status: v.status,
+      ready: [has(people, p => p.kind === 'team'), has(files, f => f.side === 'supervisor'), has(people, p => p.kind === 'exec'),
+              !!(s.venueName || s.address), has(people, p => p.kind === 'coord'), has(files, f => f.side === 'district')],
+      fTotal: fs.length, fDone: fs.filter(f => f.status === 'done').length,
+    };
+  }).sort((a, b) => (a.date + a.start).localeCompare(b.date + b.start));
+  return {
+    public: true, districts: DISTRICTS,
+    settings: { year: st.year, title: st.title, contact: st.contact || '' },
+    visits,
+    news: table_('News').map(n => ({ id: n.id, title: n.title, body: n.body, pinned: isOn_(n.pinned), createdAt: n.createdAt }))
+      .sort((a, b) => (b.pinned - a.pinned) || b.createdAt.localeCompare(a.createdAt)),
+  };
 }
 
 /* ---------- สิทธิ์ ---------- */
